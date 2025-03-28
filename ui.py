@@ -92,10 +92,10 @@ class EventControlApp:
         ttk.Label(event1_frame, text="Event 1: Person Detection Log").pack(side=tk.LEFT)
         self.event1_btn = ttk.Checkbutton(
             event1_frame,
-            style="On.TCheckbutton",  # 初始状态为ON
+            style="On.TCheckbutton",  # initial state as ON
             variable=self.events_state[0],
             command=lambda: self.update_button_style(0),
-            text="ON" if self.events_state[0].get() else "OFF"  # 动态显示ON/OFF
+            text="ON" if self.events_state[0].get() else "OFF"  # ON/OFF
         )
         self.event1_btn.pack(side=tk.RIGHT)
 
