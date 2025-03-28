@@ -1,1 +1,1 @@
-# EE488-Embedded-System-Design
+# ECSE488-Embedded-System-Design
