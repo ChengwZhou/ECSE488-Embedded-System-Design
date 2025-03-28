@@ -23,7 +23,7 @@ class EventControlApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Video Surveillance System")
-        self.root.geometry("800x6000")
+        self.root.geometry("800x600")
 
         self.events_state = [tk.BooleanVar(value=True) for _ in range(4)]
 
