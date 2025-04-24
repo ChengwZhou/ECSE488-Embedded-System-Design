@@ -1,6 +1,7 @@
 import cv2
 from datetime import datetime
 import os
+import time
 import numpy as np
 import tkinter as tk
 from tkinter import ttk, Label
@@ -10,6 +11,7 @@ from PIL import Image, ImageTk
 
 import builtins
 import tkinter.scrolledtext as scrolledtext
+from pir_sensor import PIRSensorController
 
 
 exit_program = False
@@ -28,6 +30,9 @@ mode_lock = threading.Lock()
 auto_switch = False
 detection_flag = False
 
+pir_states = {0: False, 1: False}
+pir_controller = None
+
 
 class EventControlApp:
     def __init__(self, root):
@@ -37,6 +42,7 @@ class EventControlApp:
 
         self.events_state = [tk.BooleanVar(value=True) for _ in range(4)]
         self.cam_mode = tk.StringVar(value="manual")
+        self.pir_mode = tk.BooleanVar(value=False)
         self.selected_camera = tk.IntVar(value=0)
 
         self._orig_print = builtins.print
@@ -145,6 +151,33 @@ class EventControlApp:
         ttk.Button(man, text="Camera 1", command=lambda: self.switch_camera(0)).pack(side=tk.LEFT, expand=True)
         ttk.Button(man, text="Camera 2", command=lambda: self.switch_camera(1)).pack(side=tk.RIGHT, expand=True)
         self.cam_label = ttk.Label(cam_frame, text="Current Camera: 1"); self.cam_label.pack(pady=5)
+
+        # PIR Polling
+        pir_frame = ttk.Frame(parent)
+        pir_frame.pack(fill=tk.X, pady=5)
+        ttk.Checkbutton(
+            pir_frame,
+            text="PIR Polling Mode",
+            variable=self.pir_mode,
+            command=self.on_pir_mode_toggle
+        ).pack(side=tk.LEFT)
+
+    def on_pir_mode_toggle(self):
+        global pir_controller, auto_switch
+
+        if self.pir_mode.get():
+            # turn on PIR mode，停止自动切换
+            auto_switch = False
+            if pir_controller is None:
+                pir_controller = PIRSensorController(pir_pins=[3, 4], states=pir_states)
+                pir_controller.start()
+            self.status_bar.config(text="PIR Mode ON")
+        else:
+            # turn off PIR mode
+            if pir_controller:
+                pir_controller.stop()
+            pir_controller = None
+            self.status_bar.config(text="PIR Mode OFF")
 
     def on_cam_mode_change(self):
         global auto_switch
@@ -347,6 +380,17 @@ def video_processing(caps, cam_index_var, events_state, queue, image_queue):
         with mode_lock:
             idx = cam_index_var.get()
         current_idx = idx
+
+        if pir_controller is not None and not pir_states[idx]:
+            # 动态获取摄像头分辨率
+            width = int(caps[idx].get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(caps[idx].get(cv2.CAP_PROP_FRAME_HEIGHT))
+            blank = np.zeros((height, width, 3), dtype=np.uint8)
+            pil_image = Image.fromarray(blank)
+            image_queue.put(pil_image)
+            time.sleep(0.05)  # 减少 CPU 占用
+            continue
+
         ret, frame = caps[idx].read()
         if not ret:
             print(f"[ERROR] Failed to capture from camera {idx}.")
