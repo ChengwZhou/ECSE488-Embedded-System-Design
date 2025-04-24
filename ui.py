@@ -85,8 +85,10 @@ class EventControlApp:
         self.create_camera_controls(control_frame)
 
         # log frame
+        # log_frame = ttk.LabelFrame(self.root, text="Log")
+        # log_frame.place(relx=0.025, rely=0.65, relwidth=0.32, relheight=0.23)
         log_frame = ttk.LabelFrame(self.root, text="Log")
-        log_frame.place(relx=0.025, rely=0.65, relwidth=0.32, relheight=0.23)
+        log_frame.place(x=20, y=390, width=256, height=138)
 
         # ScrolledText scrolling control
         self.log_text = scrolledtext.ScrolledText(log_frame, state='disabled', wrap='word', height=8)
@@ -181,10 +183,12 @@ class EventControlApp:
 
     def on_cam_mode_change(self):
         global auto_switch
-        if self.cam_mode.get()=="auto":
-            auto_switch=True; self.schedule_auto_switch()
+        if self.cam_mode.get() == "auto":
+            auto_switch = True
+            self.schedule_auto_switch()
         else:
-            auto_switch=False; self.root.after_cancel(self.auto_job) if hasattr(self,'auto_job') else None
+            auto_switch = False
+            self.root.after_cancel(self.auto_job) if hasattr(self,'auto_job') else None
 
     def schedule_auto_switch(self):
         self.auto_job = self.root.after(5000, self.auto_switch_camera)
