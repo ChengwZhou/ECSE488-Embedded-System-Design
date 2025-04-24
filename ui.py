@@ -8,16 +8,26 @@ import threading
 from queue import Queue, Empty
 from PIL import Image, ImageTk
 
+import builtins
+import tkinter.scrolledtext as scrolledtext
+
+
 exit_program = False
 flag = False
 storage_dir = "events"
-cap = cv2.VideoCapture(0)
-if not cap.isOpened():
-    print("can't open camera")
-    exit()
+caps = [cv2.VideoCapture(0), cv2.VideoCapture(1)]
+for i, cam in enumerate(caps):
+    if not cam.isOpened():
+        print(f"can't open camera {i}")
+        exit()
 
 # Note 1. add red alarm bounding box.
 # Note 2. Passing-by, Approaching, Suspicious detection.
+# Thread-safe lock and auto-switch flag
+mode_lock = threading.Lock()
+auto_switch = False
+detection_flag = False
+
 
 class EventControlApp:
     def __init__(self, root):
@@ -26,18 +36,28 @@ class EventControlApp:
         self.root.geometry("800x600")
 
         self.events_state = [tk.BooleanVar(value=True) for _ in range(4)]
+        self.cam_mode = tk.StringVar(value="manual")
+        self.selected_camera = tk.IntVar(value=0)
+
+        self._orig_print = builtins.print
+        builtins.print = self._gui_print
 
         self.setup_ui()
 
         self.event_queue = Queue()
         self.image_queue = Queue()
+        self.log_queue = Queue()
 
-        self.thread = threading.Thread(target=video_processing,
-                                       args=(cap, self.events_state, self.event_queue, self.image_queue))
+        self.thread = threading.Thread(
+            target=video_processing,
+            args=(caps, self.selected_camera, self.events_state, self.event_queue, self.image_queue),
+            daemon=True
+        )
         self.thread.start()
 
         self.update_image()
         self.root.after(100, self.check_queue)
+        self.root.after(100, self._flush_logs)
 
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
@@ -51,11 +71,20 @@ class EventControlApp:
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
         # Left control panel
-        control_frame = ttk.LabelFrame(main_frame, text="Event Controls", padding=(10, 5))
+        control_frame = ttk.LabelFrame(main_frame, text="Mode Controls", padding=(10, 5))
         control_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
 
         # Event control options
         self.create_event_controls(control_frame)
+        self.create_camera_controls(control_frame)
+
+        # log frame
+        log_frame = ttk.LabelFrame(self.root, text="Log")
+        log_frame.place(relx=0.025, rely=0.65, relwidth=0.32, relheight=0.23)
+
+        # ScrolledText scrolling control
+        self.log_text = scrolledtext.ScrolledText(log_frame, state='disabled', wrap='word', height=8)
+        self.log_text.pack(fill=tk.BOTH, expand=True)
 
         # Video display area
         video_frame = ttk.LabelFrame(main_frame, text="Live Monitoring", padding=(5, 5))
@@ -67,6 +96,7 @@ class EventControlApp:
         # Status bar
         self.status_bar = ttk.Label(main_frame, text="System Ready", relief=tk.SUNKEN)
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X, pady=(5, 0))
+
 
         # Exit button
         exit_btn = ttk.Button(control_frame, text="Exit System", command=self.on_close)
@@ -87,56 +117,56 @@ class EventControlApp:
         style.configure("On.TCheckbutton", foreground="green", font=('Helvetica', 10, 'bold'))
         style.configure("Off.TCheckbutton", foreground="red", font=('Helvetica', 10))
 
-        event1_frame = ttk.Frame(parent)
-        event1_frame.pack(fill=tk.X, pady=5)
-        ttk.Label(event1_frame, text="Event 1: Person Detection Log").pack(side=tk.LEFT)
-        self.event1_btn = ttk.Checkbutton(
-            event1_frame,
-            style="On.TCheckbutton",  # initial state as ON
-            variable=self.events_state[0],
-            command=lambda: self.update_button_style(0),
-            text="ON" if self.events_state[0].get() else "OFF"  # ON/OFF
-        )
-        self.event1_btn.pack(side=tk.RIGHT)
+        events = ["Event 1: Person Detection Log", "Event 2: Capture Standard Photo",
+                  "Event 3: Capture HD Photo", "Event 4: Close-Range Recording"]
+        for i, text in enumerate(events):
+            frame = ttk.Frame(parent)
+            frame.pack(fill=tk.X, pady=5)
+            ttk.Label(frame, text=text).pack(side=tk.LEFT)
+            btn = ttk.Checkbutton(
+                frame, style="On.TCheckbutton", variable=self.events_state[i],
+                command=lambda idx=i: self.update_button_style(idx),
+                text="ON" if self.events_state[i].get() else "OFF"
+            )
+            setattr(self, f"event{i + 1}_btn", btn)
+            btn.pack(side=tk.RIGHT)
 
-        # Event 2 control
-        event2_frame = ttk.Frame(parent)
-        event2_frame.pack(fill=tk.X, pady=5)
-        ttk.Label(event2_frame, text="Event 2: Capture Standard Photo").pack(side=tk.LEFT)
-        self.event2_btn = ttk.Checkbutton(
-            event2_frame,
-            style="On.TCheckbutton",
-            variable=self.events_state[1],
-            command=lambda: self.update_button_style(1),
-            text="ON" if self.events_state[1].get() else "OFF"
-        )
-        self.event2_btn.pack(side=tk.RIGHT)
+    def update_button_style(self, idx):
+        btn = getattr(self, f"event{idx+1}_btn")
+        if self.events_state[idx].get(): btn.configure(style="On.TCheckbutton", text="ON")
+        else: btn.configure(style="Off.TCheckbutton", text="OFF")
 
-        # Event 3 control
-        event3_frame = ttk.Frame(parent)
-        event3_frame.pack(fill=tk.X, pady=5)
-        ttk.Label(event3_frame, text="Event 3: Capture HD Photo").pack(side=tk.LEFT)
-        self.event3_btn = ttk.Checkbutton(
-            event3_frame,
-            style="On.TCheckbutton",
-            variable=self.events_state[2],
-            command=lambda: self.update_button_style(2),
-            text="ON" if self.events_state[2].get() else "OFF"
-        )
-        self.event3_btn.pack(side=tk.RIGHT)
+    def create_camera_controls(self, parent):
+        cam_frame = ttk.LabelFrame(parent, text="Camera Controls", padding=(10,5))
+        cam_frame.pack(fill=tk.X, pady=10)
+        ttk.Radiobutton(cam_frame, text="Manual", variable=self.cam_mode, value="manual", command=self.on_cam_mode_change).pack(anchor=tk.W)
+        ttk.Radiobutton(cam_frame, text="Auto (5s)", variable=self.cam_mode, value="auto", command=self.on_cam_mode_change).pack(anchor=tk.W)
+        man = ttk.Frame(cam_frame); man.pack(fill=tk.X, pady=5)
+        ttk.Button(man, text="Camera 1", command=lambda: self.switch_camera(0)).pack(side=tk.LEFT, expand=True)
+        ttk.Button(man, text="Camera 2", command=lambda: self.switch_camera(1)).pack(side=tk.RIGHT, expand=True)
+        self.cam_label = ttk.Label(cam_frame, text="Current Camera: 1"); self.cam_label.pack(pady=5)
 
-        # Event 4 control
-        event4_frame = ttk.Frame(parent)
-        event4_frame.pack(fill=tk.X, pady=5)
-        ttk.Label(event4_frame, text="Event 4: Close-Range Recording").pack(side=tk.LEFT)
-        self.event4_btn = ttk.Checkbutton(
-            event4_frame,
-            style="On.TCheckbutton",
-            variable=self.events_state[3],
-            command=lambda: self.update_button_style(3),
-            text="ON" if self.events_state[3].get() else "OFF"
-        )
-        self.event4_btn.pack(side=tk.RIGHT)
+    def on_cam_mode_change(self):
+        global auto_switch
+        if self.cam_mode.get()=="auto":
+            auto_switch=True; self.schedule_auto_switch()
+        else:
+            auto_switch=False; self.root.after_cancel(self.auto_job) if hasattr(self,'auto_job') else None
+
+    def schedule_auto_switch(self):
+        self.auto_job = self.root.after(5000, self.auto_switch_camera)
+
+    def auto_switch_camera(self):
+        global detection_flag
+        if not detection_flag:
+            nxt = 1 - self.selected_camera.get()
+            self.switch_camera(nxt)
+        self.schedule_auto_switch()
+
+    def switch_camera(self, idx):
+        with mode_lock:
+            self.selected_camera.set(idx)
+        self.cam_label.config(text=f"Current Camera: {idx+1}")
 
     def update_image(self):
         try:
@@ -173,6 +203,24 @@ class EventControlApp:
         exit_program = True
         self.root.destroy()
 
+    def _gui_print(self, *args, **kwargs):
+        msg = " ".join(str(a) for a in args)
+        self.log_queue.put(msg)
+        self._orig_print(msg, **kwargs)
+
+    def _flush_logs(self):
+        try:
+            while True:
+                msg = self.log_queue.get_nowait()
+                self.log_text.config(state='normal')
+                self.log_text.insert('end', msg + '\n')
+                self.log_text.see('end')
+                self.log_text.config(state='disabled')
+        except Empty:
+            pass
+        finally:
+            self.root.after(100, self._flush_logs)
+
 
 def set_resolution(cap, width, height):
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
@@ -184,8 +232,8 @@ def log_event(event_type):
         log_file.write(f"{datetime.now()}: {event_type}\n")
 
 
-def capture_photo(resolution, event_type, pic):
-    ret, frame = pic.read()
+def capture_photo(resolution, event_type, cam):
+    ret, frame = cam.read()
     if ret:
         resized = cv2.resize(frame, resolution)
         filename = f"{storage_dir}/{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}_{event_type}.jpg"
@@ -204,11 +252,11 @@ def trigger(n, events_state):
         log_event("event1")
         print("event 1 write!")
     elif n == 2 and events_state[1].get():
-        capture_photo((640, 480), "event2", cap)
+        capture_photo((640, 480), "event2", caps[current_idx])
         log_event("event2")
         print("event 2 write!")
     elif n == 3 and events_state[2].get():
-        capture_photo((1920, 1080), "event3", cap)
+        capture_photo((1920, 1080), "event3", caps[current_idx])
         log_event("event3")
         print("event 3 write!")
     elif n == 4 and events_state[3].get():
@@ -222,17 +270,17 @@ def distance_finder(focal_length, real_face_width, face_width_in_frame):
     return distance
 
 
-def check_queue(window,queue, events_state):
-    try:
-        while True:  # Process all available items in the queue
-            task = queue.get_nowait()
-            if task:
-                n = task[0]
-                trigger(n, events_state)
-    except Empty:
-        pass
-    finally:
-        window.after(1, check_queue, window, queue, events_state)  # Schedule next check
+# def check_queue(window, queue, events_state):
+#     try:
+#         while True:  # Process all available items in the queue
+#             task = queue.get_nowait()
+#             if task:
+#                 n = task[0]
+#                 trigger(n, events_state)
+#     except Empty:
+#         pass
+#     finally:
+#         window.after(1, check_queue, window, queue, events_state)  # Schedule next check
 
 
 def focal_length(measured_distance, real_width, width_in_rf_image):
@@ -252,7 +300,7 @@ def update_image(label, image_queue):
         label.after(1, update_image, label, image_queue)
 
 
-def video_processing(cap, events_state, queue, image_queue):
+def video_processing(caps, cam_index_var, events_state, queue, image_queue):
     """
     Main video processing function that runs in a separate thread.
     Handles object detection, distance calculation, event triggering and video recording.
@@ -295,10 +343,13 @@ def video_processing(cap, events_state, queue, image_queue):
 
     # Main processing loop
     while not exit_program:
-        # Read frame from camera
-        ret, frame = cap.read()
+        # Select active camera
+        with mode_lock:
+            idx = cam_index_var.get()
+        current_idx = idx
+        ret, frame = caps[idx].read()
         if not ret:
-            print("[ERROR] Failed to capture frame. Exiting...")
+            print(f"[ERROR] Failed to capture from camera {idx}.")
             break
 
         frame_counter += 1
@@ -320,6 +371,7 @@ def video_processing(cap, events_state, queue, image_queue):
             outs = net.forward(net.getUnconnectedOutLayersNames())
 
             frame_height, frame_width = frame.shape[:2]
+            # print(frame_height, frame_width)
 
             # Process detection results
             for out in outs:
@@ -345,8 +397,11 @@ def video_processing(cap, events_state, queue, image_queue):
             indices = cv2.dnn.NMSBoxes(boxes, confidences, 0.5, 0.4)
 
             # Update tracked objects with new detections
-            for idx in indices:
-                box = boxes[idx]
+            # for idx in indices:
+            #     box = boxes[idx]
+            # Apply Non-Maximum Suppression ...
+            for det_idx in indices:
+                box = boxes[det_idx]
                 x, y, w, h = box[0], box[1], box[2], box[3]
                 distance = distance_finder(focal, human_wide, w)
 
@@ -363,7 +418,7 @@ def video_processing(cap, events_state, queue, image_queue):
                     tracked_objects[matched_id].update({
                         'box': box,
                         'distance': distance,
-                        'confidence': confidences[idx],
+                        'confidence': confidences[det_idx],
                         'last_seen': frame_counter
                     })
                 else:
@@ -371,7 +426,7 @@ def video_processing(cap, events_state, queue, image_queue):
                     tracked_objects[current_id] = {
                         'box': box,
                         'distance': distance,
-                        'confidence': confidences[idx],
+                        'confidence': confidences[det_idx],
                         'last_seen': frame_counter
                     }
                     current_id += 1
@@ -395,8 +450,13 @@ def video_processing(cap, events_state, queue, image_queue):
                     flag = False
 
             prestatus = now.copy()
-            print(f"[DEBUG] Status array: {now}, Recording flag: {flag}")
+            # print(f"[DEBUG] Status array: {now}, Recording flag: {flag}")
             now.fill(0)
+
+            # -----------------------------
+            global detection_flag
+            detection_flag = prestatus[1:].sum() > 0
+            # -----------------------------
 
         # Draw all tracked objects (including recently lost ones)
         for obj_id, obj in tracked_objects.items():
@@ -431,14 +491,12 @@ def video_processing(cap, events_state, queue, image_queue):
             else:
                 start_time = datetime.now()  # Keep updating start time
 
-            ret, vidframe = cap.read()
-            if ret:
-                out2vid.write(vidframe)
+            ret2, f2 = caps[idx].read()
+            if ret2 and out2vid: out2vid.write(f2)
         elif start_time != -1:  # If recording but event not active
             if (datetime.now() - start_time).seconds < duration:
-                ret, vidframe = cap.read()
-                if ret:
-                    out2vid.write(vidframe)
+                ret2, f2 = caps[idx].read()
+                if ret2: out2vid.write(f2)
             else:
                 flag = False
                 start_time = -1
@@ -451,8 +509,8 @@ def video_processing(cap, events_state, queue, image_queue):
         image_queue.put(pil_image)
 
     # Release camera when done
-    cap.release()
-    print("[INFO] Video processing thread terminated")
+    for cam in caps: cam.release()
+    print("[INFO] Video thread ended")
 
 
 def calculate_iou(box1, box2):
@@ -494,7 +552,6 @@ def main():
     root.mainloop()
 
     app.thread.join()
-    cap.release()
 
 
 if __name__ == "__main__":
