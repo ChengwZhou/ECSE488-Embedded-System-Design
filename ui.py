@@ -171,7 +171,7 @@ class EventControlApp:
             # turn on PIR mode
             auto_switch = False
             if pir_controller is None:
-                pir_controller = PIRSensorController(pir_pins=[3, 4], states=pir_states)
+                pir_controller = PIRSensorController(pir_pins=[23, 24], states=pir_states)
                 pir_controller.start()
             self.status_bar.config(text="PIR Mode ON")
         else:
