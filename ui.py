@@ -339,6 +339,7 @@ def update_image(label, image_queue):
         label.after(1, update_image, label, image_queue)
 
 
+
 def video_processing(caps, cam_index_var, events_state, queue, image_queue):
     """
     Main video processing function that runs in a separate thread.
