@@ -227,13 +227,26 @@ class EventControlApp:
             while True:
                 task = self.event_queue.get_nowait()
                 if task:
-                    n = task[0]
-                    trigger(n, self.events_state)
-                    self.status_bar.config(text=f"Event {n} triggered - {datetime.now().strftime('%H:%M:%S')}")
+                    # 解包出事件编号和摄像头索引
+                    n, cam_idx = task
+                    # 传入 cam_idx 给 trigger
+                    trigger(n, self.events_state, cam_idx)
+                    # 在状态栏显示是哪个摄像头触发的
+                    self.status_bar.config(
+                        text=f"Event {n} triggered on camera {cam_idx+1} — {datetime.now().strftime('%H:%M:%S')}"
+                    )
         except Empty:
             pass
         finally:
             self.root.after(100, self.check_queue)
+
+
+
+
+
+
+
+
 
     def on_close(self):
         global exit_program
@@ -283,17 +296,17 @@ def exit_app(window):
     window.destroy()
 
 
-def trigger(n, events_state):
+def trigger(n, events_state, cam_idx):
     global flag, cap
     if n == 1 and events_state[0].get():
         log_event("event1")
         print("event 1 write!")
     elif n == 2 and events_state[1].get():
-        capture_photo((640, 480), "event2", caps[current_idx])
+        capture_photo((640, 480), "event2", caps[cam_idx])
         log_event("event2")
         print("event 2 write!")
     elif n == 3 and events_state[2].get():
-        capture_photo((1920, 1080), "event3", caps[current_idx])
+        capture_photo((1920, 1080), "event3", caps[cam_idx])
         log_event("event3")
         print("event 3 write!")
     elif n == 4 and events_state[3].get():
@@ -480,19 +493,18 @@ def video_processing(caps, cam_index_var, events_state, queue, image_queue):
                     current_id += 1
 
                 # Count people in different distance zones
-                if distance < 300:
+                if distance < 100:
                     now[4] += 1
-                elif distance < 500:
+                elif distance < 300:
                     now[3] += 1
-                elif distance < 1000:
+                elif distance < 500:
                     now[2] += 1
-                else:
-                    now[1] += 1
+                now[1] += 1
 
             # Check for status changes and trigger events
             for j in range(1, 5):
                 if now[j] != prestatus[j]:
-                    queue.put((j,))
+                    queue.put((j, idx))
                     print(f"[EVENT] Triggering event {j}")
                 if now[4] == prestatus[4]:
                     flag = False
