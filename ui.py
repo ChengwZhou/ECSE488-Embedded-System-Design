@@ -168,7 +168,7 @@ class EventControlApp:
         global pir_controller, auto_switch
 
         if self.pir_mode.get():
-            # turn on PIR mode，停止自动切换
+            # turn on PIR mode
             auto_switch = False
             if pir_controller is None:
                 pir_controller = PIRSensorController(pir_pins=[3, 4], states=pir_states)
@@ -227,11 +227,8 @@ class EventControlApp:
             while True:
                 task = self.event_queue.get_nowait()
                 if task:
-                    # 解包出事件编号和摄像头索引
                     n, cam_idx = task
-                    # 传入 cam_idx 给 trigger
                     trigger(n, self.events_state, cam_idx)
-                    # 在状态栏显示是哪个摄像头触发的
                     self.status_bar.config(
                         text=f"Event {n} triggered on camera {cam_idx+1} — {datetime.now().strftime('%H:%M:%S')}"
                     )
@@ -239,14 +236,6 @@ class EventControlApp:
             pass
         finally:
             self.root.after(100, self.check_queue)
-
-
-
-
-
-
-
-
 
     def on_close(self):
         global exit_program
