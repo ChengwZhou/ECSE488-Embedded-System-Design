@@ -112,5 +112,6 @@ python ui.py
 [//]: # ()
 [//]: # (---)
 
-**Author:** **Author:** [Lauren Hong](https://github.com/lhong03), [Chengwei Zhou](https://github.com/ChengwZhou)
+**Author:** [Lauren Hong](https://github.com/lhong03), [Chengwei Zhou](https://github.com/ChengwZhou)
+---
 **Date:** May 2025
